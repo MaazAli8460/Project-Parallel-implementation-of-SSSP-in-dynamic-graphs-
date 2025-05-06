@@ -10,8 +10,6 @@ This project implements a parallel Dynamic Single-Source Shortest Path (SSSP) al
 * [Usage](#usage)
 * [Input Format](#input-format)
 * [Output](#output)
-* [Accuracy Metric](#accuracy-metric)
-* [Directory Structure](#directory-structure)
 * [Contributing](#contributing)
 * [License](#license)
 
