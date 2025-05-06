@@ -1,162 +1,215 @@
-Parallel SSSP Implementation for Dynamic Networks
-This project implements a parallel algorithm for updating Single-Source Shortest Paths (SSSP) in large-scale dynamic networks, based on the research paper: A Parallel Algorithm Template for Updating Single-Source Shortest Paths in Large-Scale Dynamic Networks. The implementation uses MPI for inter-node communication, OpenMP for intra-node parallelism, and METIS for graph partitioning. The code is designed to handle dynamic graph updates (edge insertions and deletions) efficiently and evaluate scalability across multiple machines.
-Project Overview
-The program, dynamic_sssp_mpi.c, performs the following tasks:
+# Dynamic SSSP MPI
 
-Loads a graph from an edge list file.
-Partitions the graph using METIS to distribute vertices across MPI ranks.
-Computes an initial SSSP tree using Dijkstra's algorithm.
-Processes a specified number of random edge edits (insertions and deletions) in batches.
-Updates the SSSP tree using a four-phase approach: deletion processing, insertion processing, deletion propagation, and relaxation with ghost vertex exchange.
-Outputs timing metrics for each phase, communication, CPU, and wall clock time.
-Logs the final SSSP tree and computes accuracy against a sequential Dijkstra's run.
+This project implements a parallel Dynamic Single-Source Shortest Path (SSSP) algorithm using MPI and OpenMP. It supports dynamic graph updates (edge insertions and deletions) and computes shortest paths from a source vertex (vertex 0) in a weighted undirected graph. The accuracy of the dynamic SSSP algorithm is evaluated using a path validation method, which verifies the correctness of the shortest path tree by comparing path weights against ground-truth distances computed by Dijkstra's algorithm.
 
-Prerequisites
+## Table of Contents
 
-MPI: Install an MPI implementation (e.g., OpenMPI or MPICH).
-METIS: Install the METIS library for graph partitioning.
-OpenMP: Ensure a compiler with OpenMP support (e.g., GCC).
-SSH: Configure passwordless SSH for communication between machines.
-C Compiler: GCC or compatible compiler with C99 support.
-Operating System: Linux (tested on Ubuntu).
+* [Features](#features)
+* [Prerequisites](#prerequisites)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Input Format](#input-format)
+* [Output](#output)
+* [Accuracy Metric](#accuracy-metric)
+* [Directory Structure](#directory-structure)
+* [Contributing](#contributing)
+* [License](#license)
 
-Cluster Setup
-The implementation was tested on a cluster of two PCs communicating via MPI. Below are the steps to set up the cluster:
+## Features
 
-Create MPI User:
+* **Dynamic Graph Updates:** Supports edge insertions and deletions in a weighted undirected graph.
+* **Parallel Processing:** Uses MPI for distributed computing and OpenMP for multi-threaded parallelism within nodes.
+* **Graph Partitioning:** Employs METIS to partition the graph for load balancing across MPI ranks.
+* **Four-Phase Update Algorithm:**
 
-On both PCs, create a user mpiuser1:sudo adduser mpiuser1
+  * Deletion Phase
+  * Insertion Phase
+  * Propagation Phase
+  * Relaxation Phase
+* **Accuracy Evaluation:** Validates shortest paths by tracing paths from each vertex to the source and comparing their weights against Dijkstra's ground-truth distances.
+* **Timing Metrics:** Reports detailed timings for each phase, communication, CPU, and wall clock time.
+* **Error Handling:** Includes robust checks for memory allocation, file access, and invalid inputs.
 
+## Prerequisites
 
-Switch to mpiuser1:su - mpiuser1
+To compile and run the program, ensure the following are installed:
 
+* **MPI Implementation:** OpenMPI or MPICH (e.g., openmpi).
+* **OpenMP:** Supported by the compiler (e.g., gcc with OpenMP support).
+* **METIS Library:** For graph partitioning (libmetis).
+* **C Compiler:** GCC or compatible (gcc recommended).
+* **Operating System:** Linux/Unix-based system.
 
+Dependencies:
 
+* Standard C libraries (libc, libm).
+* POSIX-compliant system for timing functions.
 
-Install Dependencies:
+Install dependencies on a Debian-based system:
 
-Install MPI, METIS, and SSH:sudo apt update
-sudo apt install openmpi-bin openmpi-common libopenmpi-dev metis libmetis-dev openssh-server openssh-client build-essential
+```bash
+sudo apt-get update
+sudo apt-get install build-essential openmpi-bin libopenmpi-dev libomp-dev libmetis-dev
+```
 
+## Installation
 
+1. **Clone or Download the Repository:**
 
+   ```bash
+   git clone <repository-url>
+   cd dynamic-sssp-mpi
+   ```
 
-Configure SSH:
+2. **Compile the Program:**
+   Compile the source code using `mpicc` with OpenMP and METIS support:
 
-Generate SSH keys for mpiuser1 on both PCs:ssh-keygen -t rsa
+   ```bash
+   mpicc -g -O3 -std=c99 -fopenmp dynamic_sssp_mpi.c -lmetis -lm -o dsssp
+   ```
 
+3. **Set Up Hosts File:**
+   Create a hosts file specifying the machines and slots for MPI execution. Example:
 
-Copy the public key to the other PC:ssh-copy-id mpiuser1@<other_pc_ip>
+   ```bash
+   cat > hosts << EOL
+   pc1 slots=2
+   pc2 slots=2
+   EOL
+   ```
 
+   Replace `pc1` and `pc2` with your machine hostnames and adjust slots based on available cores.
 
-Test passwordless SSH:ssh mpiuser1@<other_pc_ip>
+4. **Copy Executable to Remote Nodes (if using multiple machines):**
 
+   ```bash
+   scp dsssp mpiuser1@pc2:~/mpi_programs/
+   ```
 
+   Ensure the executable is in the same path on all nodes (e.g., `~/mpi_programs/`).
 
+## Usage
 
-Configure Hosts File:
+Run the program using `mpirun` with the following syntax:
 
-Edit /etc/hosts on both PCs to include IP addresses and hostnames:sudo nano /etc/hosts
+```bash
+mpirun --verbose -np <num_processes> --hostfile hosts ./dsssp <edgeFile> <numEdits> <percentAdd>
+```
 
-Add:<pc1_ip> pc1
-<pc2_ip> pc2
-
-
-
-
-Create MPI Hostfile:
-
-In the home directory of mpiuser1 on the master PC (pc1), create a file hosts:nano hosts
-
-Add:pc1 slots=2
-pc2 slots=2
-
-
-
-
-
-Compilation and Execution
-
-Compile the Code:
-
-Compile dynamic_sssp_mpi.c with METIS and OpenMP support:mpicc -g -O3 -std=c99 -fopenmp dynamic_sssp_mpi.c -lmetis -lm -o dsssp
-
-
-
-
-Copy Executable to Other PC:
-
-Copy the compiled binary to pc2:scp ~/mpi_programs/dsssp mpiuser1@pc2:~/mpi_programs/
-
-
-
-
-Run the Program:
-
-Execute the program with 4 processes (2 per PC) using the hostfile:mpirun --verbose -np 4 --hostfile hosts ./dsssp data.txt 500 50
-
-
-Arguments:
-data.txt: Input file containing the edge list (format: u v w per line, where u and v are vertices and w is the edge weight).
-500: Number of total edge edits (insertions + deletions).
-50: Percentage of edits that are insertions (50% means 250 insertions and 250 deletions).
-
-
-
-
-
-Input File Format
-The input file (data.txt) should contain one edge per line in the format:
-u v w
-
-
-u, v: Vertex IDs (0-based integers).
-w: Edge weight (positive integer).
+* `<num_processes>`: Number of MPI processes (e.g., 4).
+* `<edgeFile>`: Path to the input graph file (see Input Format).
+* `<numEdits>`: Total number of edge edits (insertions + deletions).
+* `<percentAdd>`: Percentage of edits that are insertions (0–100). The rest are deletions.
 
 Example:
+
+```bash
+mpirun --verbose -np 4 --hostfile hosts ./dsssp UD_W.txt 500 50
+```
+
+This runs the program with:
+
+* 4 MPI processes.
+* Input graph from `UD_W.txt`.
+* 500 total edits (250 insertions, 250 deletions, as `percentAdd = 50`).
+
+## Input Format
+
+The input graph file (`<edgeFile>`) is a text file containing edge descriptions in the format:
+
+```
+u v w
+```
+
+* `u`: Source vertex ID (non-negative integer).
+* `v`: Destination vertex ID (non-negative integer).
+* `w`: Edge weight (positive integer).
+
+Example (`UD_W.txt`):
+
+```
 0 1 5
-1 2 3
-2 0 7
-
-Output
-
-Console Output:
-
-Number of vertices and edges loaded.
-Phase timings (deletion, insertion, propagation, relax+ghost).
-Total communication, CPU, and wall clock time per rank.
-Cumulative CPU time across all ranks.
-
-
-Log File (log.txt):
-
-Generated by rank 0, containing the final SSSP tree:Final SSSP Tree:
-Vertex  Distance    Parent
-0       0           -1
-1       5           0
-2       8           1
+0 2 3
+1 2 4
 ...
+```
 
+Notes:
 
+* The graph is undirected, so an edge `u v w` implies `v u w`.
+* Vertex IDs are automatically resized to accommodate the maximum ID in the file.
+* Weights must be positive (`w > 0`).
 
+## Output
 
+The program produces two types of output:
 
-Scalability and Performance
+### Terminal Output:
 
-Scalability: The program evaluates weak and strong scaling by distributing the graph across multiple MPI ranks and processing edits in parallel.
-METIS Partitioning: Ensures balanced vertex distribution and minimizes inter-node communication.
-OpenMP: Parallelizes computation within each node for deletion, insertion, and relaxation phases.
-Batching: Edits are processed in batches (default size: 30) to improve load balancing.
+* **Edit Summary:** Total edits, insertions, and deletions.
+* **Graph Info:** Number of vertices and edges loaded.
+* **Phase Timings (on rank 0):** Deletion, insertion, propagation, and relaxation + ghost exchange times.
+* **Total Timings (on rank 0):** Communication time, CPU time, wall clock time, and cumulative CPU time across all ranks.
+* **Per-Rank Timings:** Communication and CPU time for each rank, along with the hostname.
 
-Notes
+Example:
 
-Ensure the input graph has positive edge weights, as negative weights are not supported.
-The program assumes the input graph is undirected; each edge is added bidirectionally.
-Accuracy is computed by comparing the parallel SSSP tree against a sequential Dijkstra's run on the updated graph.
-The GitHub repository should include incremental commits to reflect project progress, as per the project requirements.
+```
+Total edits: 500  Ins: 250  Del: 250
+Loaded 10879 vertices, 39994 edges
+Phase timings (rank 0, host pc1):
+  Deletion:   0.000 s
+  Insertion:  0.001 s
+  Propagate:  0.000 s
+  Relax+Ghost:0.001 s
+Total communication time (rank 0): 0.000 s
+Total CPU time (rank 0): 3.641 s
+Total wall clock time (rank 0): 3.641 s
+Total cumulative CPU time (all ranks): 3.641 s
+Rank 0 (host pc1):
+  Comm time: 0.000 s
+  CPU time:  3.641 s
+Rank 1 (host pc1):
+  Comm time: 0.000 s
+  CPU time:  3.641 s
+Rank 2 (host pc2):
+  Comm time: 0.000 s
+  CPU time:  3.641 s
+Rank 3 (host pc2):
+  Comm time: 0.000 s
+  CPU time:  3.641 s
+```
 
-References
+### Log File (`log.txt`):
 
-Research Paper: A Parallel Algorithm Template for Updating Single-Source Shortest Paths in Large-Scale Dynamic Networks https://drive.google.com/file/d/1Cj7u6bLfbwfjSwtZhfDwv4V5wIuiGB9y/view?usp=sharing
-METIS Documentation: https://github.com/KarypisLab/METIS
+* **SSSP Tree:** Lists each vertex, its distance from the source, and its parent in the shortest path tree.
+* **Valid Paths:** Number of vertices with valid shortest paths.
 
+Example:
+
+```
+Final SSSP Tree:
+Vertex  Distance  Parent
+0       0         -1
+1       5         0
+2       3         0
+...
+Vertices with Valid Paths: 10650
+```
+* **Why This Metric?**:
+
+  * Validates the entire shortest path tree, not just distances, ensuring correctness of both distances and parent pointers.
+  * Robust to graph fragmentation, as it evaluates each vertex's path independently.
+  * Detects subtle errors (e.g., correct distance but incorrect path), providing a stricter and potentially more accurate assessment.
+
+* If the accuracy is low, inspect `log.txt` to identify vertices with invalid paths, which may indicate issues in the dynamic SSSP algorithm (e.g., relaxation or ghost vertex synchronization).
+
+## Contributing
+
+Contributions are welcome! To contribute:
+
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/your-feature`).
+3. Commit your changes (`git commit -m 'Add your feature'`).
+4. Push to the branch (`git push origin feature/your-feature`).
+5.
