@@ -10,9 +10,8 @@
 #include <omp.h>
 
 #define INF INT_MAX
-#define BATCH_SIZE 30 // Tunable batch size for load balancing
+#define BATCH_SIZE 30 
 
-/*---------------- Graph data structure ----------------*/
 typedef struct { int to, w; } Edge;
 typedef struct {
     int V;
@@ -23,7 +22,7 @@ typedef struct {
     int eSet_size;
 } Graph;
 
-/*---------------- SSSP data structure ----------------*/
+
 typedef struct {
     int* dist;
     int* parent;
@@ -32,16 +31,16 @@ typedef struct {
     int size;
 } SSSP;
 
-/*---------------- Timing data ----------------*/
+
 typedef struct {
-    double comm_time;    // Total communication time
-    double cpu_time;     // Per-rank CPU time
-    double total_cpu_time; // Cumulative CPU time across all ranks
-    double wall_time;    // Total wall clock time
-    double del_time;     // Deletion phase time
-    double ins_time;     // Insertion phase time
-    double prop_time;    // Propagation phase time
-    double relax_time;   // Relax+Ghost phase time
+    double comm_time;   
+    double cpu_time;     
+    double total_cpu_time; 
+    double wall_time;   
+    double del_time;     
+    double ins_time;     
+    double prop_time;    
+    double relax_time;   
 } Timing;
 
 /*---------------- Graph routines ----------------*/
@@ -123,7 +122,6 @@ void removeEdge(Graph* G, int u, int v) {
     G->eSet[edgeKey(u, v) % G->eSet_size] = 0;
 }
 
-/*---------------- SSSP routines ----------------*/
 SSSP* initSSSP(int n) {
     SSSP* T = malloc(sizeof(SSSP));
     if (!T) { fprintf(stderr, "Memory allocation failed\n"); exit(1); }
@@ -162,7 +160,6 @@ void resizeSSSP(SSSP* T, int n) {
     T->size = n;
 }
 
-/*---------------- BFS for Connected Component ----------------*/
 int bfs_component(const Graph* G, int src, char* reachable) {
     int* queue = malloc(G->V * sizeof(int));
     if (!queue) { fprintf(stderr, "Memory allocation failed\n"); exit(1); }
@@ -188,7 +185,7 @@ int bfs_component(const Graph* G, int src, char* reachable) {
     return size_reachable;
 }
 
-/*---------------- Dijkstra ----------------*/
+
 typedef struct { int d, v; } PQE;
 static int cmpPq(const void* a, const void* b) {
     return ((PQE*)a)->d - ((PQE*)b)->d;
@@ -223,7 +220,6 @@ void dijkstra(const Graph* G, SSSP* T, int src) {
     free(pq);
 }
 
-/*------------ Four-Phase Update ------------*/
 int processDeletions(Graph* G, SSSP* T, int del[][2], int delSz, int* affCount) {
     int localAff = 0;
     #pragma omp parallel for schedule(static) reduction(+:localAff)
@@ -376,7 +372,6 @@ void buildCSR(const Graph* G, idx_t** xadj, idx_t** adjncy, idx_t** adjwgt, idx_
     (*xadj)[G->V] = ofs;
 }
 
-/*------------ Timing routines ------------*/
 double get_cpu_time() {
     struct timespec ts;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
@@ -391,7 +386,6 @@ double get_wall_time(struct timespec* ts) {
     return sec;
 }
 
-/*====================== Main ======================*/
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     int rank, size;
@@ -423,7 +417,6 @@ int main(int argc, char** argv) {
     int numDel = numEdits - numIns;
     if (rank == 0) printf("Total edits: %d  Ins: %d  Del: %d\n", numEdits, numIns, numDel);
 
-    /* 1) Read global graph on rank 0 */
     Graph* G_global = initGraph(0);
     if (rank == 0) {
         FILE* fp = fopen(edgeFile, "r");
@@ -440,14 +433,12 @@ int main(int argc, char** argv) {
         fclose(fp);
     }
 
-    /* 2) Broadcast V */
     double comm_start = MPI_Wtime();
     int V = G_global->V;
     MPI_Bcast(&V, 1, MPI_INT, 0, MPI_COMM_WORLD);
     timing.comm_time += MPI_Wtime() - comm_start;
     if (rank != 0) resizeGraph(G_global, V);
 
-    /* 3) Broadcast edges */
     int E = 0;
     int (*triples)[3] = NULL;
     if (rank == 0) {
@@ -481,7 +472,6 @@ int main(int argc, char** argv) {
             addEdge(G_global, triples[i][0], triples[i][1], triples[i][2]);
     if (rank == 0) printf("Loaded %d vertices, %d edges\n", V, E);
 
-    /* 4) METIS partition */
     idx_t* part = malloc(V * sizeof(idx_t));
     if (!part) { fprintf(stderr, "Memory allocation failed\n"); MPI_Abort(MPI_COMM_WORLD, 1); }
     if (size > 1) {
@@ -510,7 +500,6 @@ int main(int argc, char** argv) {
         for (int i = 0; i < V; i++) part[i] = 0;
     }
 
-    /* 5) Extract local subgraph */
     int* g2l = malloc(V * sizeof(int));
     int* l2g = NULL;
     if (!g2l) { fprintf(stderr, "Memory allocation failed\n"); MPI_Abort(MPI_COMM_WORLD, 1); }
@@ -529,7 +518,6 @@ int main(int argc, char** argv) {
         }
     Graph* G = initGraph(localV);
 
-    /* 6) Ghost lists */
     int* ghostG = NULL;
     int* ghostL = NULL;
     int ghostSz = 0;
@@ -563,7 +551,6 @@ int main(int argc, char** argv) {
                 if (g2l[e.to] >= 0) addEdge(G, g2l[u], g2l[e.to], e.w);
             }
 
-    /* 7) Initial SSSP */
     SSSP* globalT = initSSSP(V);
     if (rank == 0) {
         dijkstra(G_global, globalT, 0);
@@ -579,7 +566,6 @@ int main(int argc, char** argv) {
             localT->parent[g2l[u]] = globalT->parent[u] == -1 ? -1 : g2l[globalT->parent[u]];
         }
 
-    /* 8) Random edits */
     int (*allDel)[2] = malloc(numDel * 2 * sizeof(int));
     int (*allIns)[2] = malloc(numIns * 2 * sizeof(int));
     int* allW = malloc(numIns * sizeof(int));
@@ -607,7 +593,6 @@ int main(int argc, char** argv) {
     MPI_Bcast(allW, numIns, MPI_INT, 0, MPI_COMM_WORLD);
     timing.comm_time += MPI_Wtime() - comm_start;
 
-    /* 9) Map global→local edits */
     int delSz = 0, insSz = 0;
     int (*delLoc)[2] = malloc(numDel * 2 * sizeof(int));
     int (*insLoc)[2] = malloc(numIns * 2 * sizeof(int));
@@ -631,18 +616,15 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* 10) Four-phase update with batching */
     struct timespec t1, t2, t3, t4, t5;
     clock_gettime(CLOCK_MONOTONIC, &t1);
     int affCount = 0;
     int anyChanges = 0;
 
-    // Check deletion-heavy threshold (display message only)
     if (numDel > 0.5 * numEdits && rank == 0) {
         printf("Deletion-heavy workload, proceeding with updates\n");
     }
 
-    // Batch deletions
     for (int i = 0; i < delSz; i += BATCH_SIZE) {
         int currSz = (i + BATCH_SIZE <= delSz) ? BATCH_SIZE : (delSz - i);
         anyChanges |= processDeletions(G, localT, &delLoc[i], currSz, &affCount);
@@ -650,7 +632,7 @@ int main(int argc, char** argv) {
     timing.del_time = get_wall_time(&t1);
     clock_gettime(CLOCK_MONOTONIC, &t2);
 
-    // Batch insertions
+    
     for (int i = 0; i < insSz; i += BATCH_SIZE) {
         int currSz = (i + BATCH_SIZE <= insSz) ? BATCH_SIZE : (insSz - i);
         anyChanges |= processInsertions(G, localT, &insLoc[i], currSz, &insW[i], &affCount);
@@ -658,12 +640,10 @@ int main(int argc, char** argv) {
     timing.ins_time = get_wall_time(&t2);
     clock_gettime(CLOCK_MONOTONIC, &t3);
 
-    // Propagate deletions
     if (anyChanges) propagateDeletion(G, localT);
     timing.prop_time = get_wall_time(&t3);
     clock_gettime(CLOCK_MONOTONIC, &t4);
 
-    // Check affected vertices threshold (display message only)
     int globalAff;
     comm_start = MPI_Wtime();
     MPI_Allreduce(&affCount, &globalAff, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
@@ -672,7 +652,6 @@ int main(int argc, char** argv) {
         printf("Too many affected vertices (%d/%d), proceeding with updates\n", globalAff, V);
     }
 
-    // Relax + ghost exchange
     int* send_counts = malloc(size * sizeof(int));
     int* send_displs = malloc(size * sizeof(int));
     int* recv_counts = malloc(size * sizeof(int));
